@@ -1,178 +1,181 @@
-**Name:** Maddox Wise  
-**Course:** CYB 3353  
-**Date:** November 2025  
-**VM Platform:** VMware Workstation Player (Windows)  
-**Deliverable #1**
+Overview
 
----
+This document details the process of installing and configuring Arch Linux ARM inside a UTM virtual machine on macOS. The installation was done manually, without the archinstall command, and includes all required modifications such as a GUI desktop environment, user creation, alternate shell, SSH setup, terminal color, and custom aliases.
 
-## 1. VM Setup
-- Created a VM using **VMware Workstation Player** (20 GB disk, 2 GB RAM, 2 cores).  
-- Attached the **archlinux-2025.11.01-x86_64.iso**.  
-- Set the VM to use **UEFI firmware** by adding `firmware = "efi"` in the `.vmx` file.  
-- **Issue:** Initially, Fusion couldn’t detect the bootloader.  
-- **Fix:** Reattached the ISO and forced **EFI firmware** in the VM settings.
+Step 1 – Setup in macOS and UTM
+1. Download Required Tools
 
----
+UTM: https://mac.getutm.app
 
-## 2. Boot & Network Setup
-Once booting from the Arch Linux ISO:
-bash
-ping -c 1 archlinux.org
-timedatectl set-ntp true
-Verified network connectivity by pinging an external server.
+Archboot AArch64 ISO: https://release.archboot.com/aarch64/latest/iso/
 
-Enabled NTP (Network Time Protocol) to sync system time.
+2. Create a New Virtual Machine
 
-3. Disk Partitioning (GPT)
-Partitioned the disk using cfdisk:
+Open UTM → Create New Virtual Machine.
 
-bash
- 
-cfdisk /dev/sda
-Created /dev/sda1 for EFI (500MB) and /dev/sda2 for root.
+Select Virtualize → Linux.
 
-Formatted partitions:
+System settings:
 
-bash
- 
-mkfs.fat -F32 /dev/sda1
-mkfs.ext4 /dev/sda2
-Mounted the partitions:
+Architecture: ARM64 (aarch64)
 
-bash
- 
-mount /dev/sda2 /mnt
-mkdir /mnt/boot && mount /dev/sda1 /mnt/boot
-Note: Used cfdisk for simplicity in partitioning.
+Memory: 4096 MB
 
-4. Base Installation
-Installed the base system:
+Storage: 20 GB (QCOW2 format)
 
-bash
- 
-pacstrap -K /mnt base linux linux-firmware vim networkmanager sudo git base-devel openssh
-Generated the fstab file:
+Boot ISO: select the downloaded Archboot ISO
 
-bash
- 
+Network: NAT
+
+Start the VM and boot into the Arch ISO.
+
+Step 2 – Base Installation (Manual Method)
+Partition the Disk
+fdisk /dev/vda
+
+
+Create a GPT table.
+
+Partition 1: 512M EFI (type EF00)
+
+Partition 2: remaining space as root.
+
+Format and Mount
+mkfs.fat -F32 /dev/vda1
+mkfs.ext4 /dev/vda2
+mount /dev/vda2 /mnt
+mkdir /mnt/boot
+mount /dev/vda1 /mnt/boot
+
+Install the Base System
+pacstrap /mnt base linux linux-firmware vim sudo networkmanager
 genfstab -U /mnt >> /mnt/etc/fstab
-Chrooted into the new system:
-
-bash
- 
 arch-chroot /mnt
-5. System Configuration
-Set up the timezone, system clock, and locale:
 
-bash
- 
+Step 3 – System Configuration
+Set Time and Hostname
 ln -sf /usr/share/zoneinfo/America/Chicago /etc/localtime
 hwclock --systohc
-sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
-locale-gen
-echo 'LANG=en_US.UTF-8' > /etc/locale.conf
-Set the hostname:
+echo "archarm" > /etc/hostname
 
-bash
- 
-echo 'arch-vm' > /etc/hostname
-6. Users & Sudo Configuration
-Created user accounts and set up sudo permissions:
-
-bash
- 
-passwd
-useradd -m -G wheel maddox
-useradd -m -G wheel codi
-passwd maddox
-passwd codi
-Edited sudoers file:
-
-bash
- 
-EDITOR=vim visudo  # uncomment %wheel ALL=(ALL:ALL) ALL
-Enabled NetworkManager:
-
-bash
- 
+Enable Networking
 systemctl enable NetworkManager
-7. Bootloader Installation
-Installed systemd-boot:
 
-bash
- 
-bootctl install
-Retrieved PARTUUID for the root partition:
+Set Root Password
+passwd
 
-bash
- 
-ROOTUUID=$(blkid -s PARTUUID -o value /dev/sda2)
-Created a bootloader entry:
+Install and Configure Bootloader
+pacman -S grub efibootmgr
+grub-install --target=arm64-efi --efi-directory=/boot --bootloader-id=GRUB
+grub-mkconfig -o /boot/grub/grub.cfg
 
-bash
- 
-cat >/boot/loader/entries/arch.conf <<EOF
-title   Arch Linux
-linux   /vmlinuz-linux
-initrd  /initramfs-linux.img
-options root=PARTUUID=$ROOTUUID rw
-EOF
-8. Desktop Environment Installation
-Installed LXQt (lightweight desktop environment):
+Step 4 – User Creation and Sudo Access
 
-bash
- 
-pacman -S xorg-server sddm lxqt pipewire wireplumber
+Create users:
+
+useradd -m -G wheel maddox
+passwd maddox
+useradd -m -G wheel codi
+passwd codi
+
+
+Grant sudo permissions:
+
+visudo
+
+
+Uncomment:
+
+%wheel ALL=(ALL) ALL
+
+Step 5 – Install Desktop Environment
+
+LXQt is lightweight and works well for ARM.
+
+pacman -S xorg lxqt sddm
 systemctl enable sddm
-systemctl set-default graphical.target
-9. Customizations
-Installed zsh and set it as the default shell:
 
-bash
- 
+
+Reboot to test the graphical login.
+
+Step 6 – Alternate Shell and Aliases
+
+Install and configure zsh:
+
 pacman -S zsh
 chsh -s /bin/zsh maddox
-Added aliases to .zshrc:
 
-bash
- 
-cat >> /home/maddox/.zshrc <<'EOF'
-export CLICOLOR=1
-alias ll='ls -alF'
-alias gs='git status'
-alias ..='cd ..'
-EOF
-Enabled SSH:
 
-bash
- 
+Edit ~/.zshrc:
+
+alias ll='ls -lah --color=auto'
+alias update='sudo pacman -Syu'
+alias cls='clear'
+
+
+Enable color in package manager:
+
+sed -i 's/#Color/Color/' /etc/pacman.conf
+
+Step 7 – SSH Setup
+
+Install and enable SSH for remote access:
+
+pacman -S openssh
 systemctl enable sshd
-10. AUR Helper Installation (yay)
-Installed yay to handle AUR packages:
+systemctl start sshd
 
-bash
- 
-sudo -u maddox bash -lc '  
-  cd /tmp  
-  git clone https://aur.archlinux.org/yay-bin.git  
-  cd yay-bin  
-  makepkg -si --noconfirm  
-  yay -S --noconfirm google-chrome  
-'
-11. Final Verification
-Verified network and user configuration:
 
-bash
- 
-ip addr show | grep inet
-getent group wheel
-echo $SHELL
-Confirmed that zsh is set as the default shell and both users are in the wheel group with sudo privileges.
+Verify IP:
 
-12. Problems & Fixes
-Problem	Fix
-“No compatible boot loader found”	Forced EFI firmware in .vmx
-Missing locale	Ran locale-gen
-Black screen after install	Enabled sddm and graphical.target
-No internet	Enabled NetworkManager service
+ip a
+
+Step 8 – Boot and Verification
+
+Exit the chroot environment:
+
+exit
+umount -R /mnt
+reboot
+
+
+After reboot, verify the following:
+
+whoami
+sudo whoami
+lsb_release -a
+ip a
+
+
+Check that the system boots to the LXQt desktop and the network connects automatically.
+
+Step 9 – Browser and AUR Setup
+
+Install Firefox for the GUI:
+
+sudo pacman -S firefox
+
+
+Install git and base-devel for AUR access:
+
+sudo pacman -S git base-devel
+
+
+Install yay (AUR helper):
+
+git clone https://aur.archlinux.org/yay.git
+cd yay
+makepkg -si
+
+
+Example AUR package installation:
+
+yay -S neofetch
+neofetch
+
+Step 10 – Problems Encountered and Solutions
+Problem	Description	Solution
+EFI bootloader failed to install	GRUB did not detect EFI correctly	Reinstalled using --target=arm64-efi and recreated config
+No network connection after reboot	NetworkManager was not enabled	Enabled and started NetworkManager service
+Sudo permission denied	Wheel group not active	Uncommented %wheel ALL=(ALL) ALL in /etc/sudoers
+No terminal color output	Defaults were off	Enabled color in /etc/pacman.conf and shell aliases
